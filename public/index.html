@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2921,6 +2920,10 @@ window.addEventListener('DOMContentLoaded',function(){
   updateStats();
   renderOverview();
   startLiveRefreshCycle();
+  // Fetch live competitor prices from database
+  setTimeout(fetchLiveCompetitorPrices, 2000);
+  // Refresh live data every 10 minutes
+  setInterval(fetchLiveCompetitorPrices, 10 * 60 * 1000);
   // Set Maison plan display
   var planEl=document.querySelector('.sb-user-plan');if(planEl)planEl.textContent='\u2605 Claspr Maison';
   var pnb=document.getElementById('planNameBanner');if(pnb)pnb.textContent='Maison';
@@ -3687,6 +3690,132 @@ function submitSupport(){
 }
 
 
+
+
+// ══════════════════════════════════════════════════════
+// LIVE DATA — fetch real competitor prices from Supabase
+// ══════════════════════════════════════════════════════
+
+var LIVE_PRICES = {};
+var LIVE_DATA_LOADED = false;
+
+function fetchLiveCompetitorPrices() {
+  // Fetch all competitor prices from our server
+  fetch('/api/status').then(function(r){ return r.json(); }).then(function(status) {
+    var lastSweep = status && status.last_sweep ? new Date(status.last_sweep) : null;
+    var lu = document.getElementById('lastUpdated');
+    if(lu && lastSweep) {
+      var mins = Math.floor((Date.now() - lastSweep.getTime()) / 60000);
+      lu.textContent = 'Updated ' + (mins < 1 ? 'just now' : mins + ' min ago');
+    }
+  }).catch(function(){});
+
+  // Fetch prices for each watch reference
+  var refs = [];
+  ALL_WATCHES.forEach(function(w) {
+    if(w.ref && refs.indexOf(w.ref) === -1) refs.push(w.ref);
+  });
+
+  var fetched = 0;
+  refs.forEach(function(ref) {
+    fetch('/api/prices/' + encodeURIComponent(ref))
+      .then(function(r) { return r.json(); })
+      .then(function(prices) {
+        if(prices && prices.length > 0) {
+          LIVE_PRICES[ref] = prices;
+          updateWatchWithLivePrices(ref, prices);
+        }
+        fetched++;
+        if(fetched === refs.length && !LIVE_DATA_LOADED) {
+          LIVE_DATA_LOADED = true;
+          patchCompetitors();
+          genAlerts();
+          updateStats();
+          renderOverview();
+          if(document.getElementById('page-listings') && 
+             !document.getElementById('page-listings').classList.contains('hidden')) {
+            renderTable();
+          }
+          toast('Live market data loaded', 'good');
+        }
+      }).catch(function() { fetched++; });
+  });
+}
+
+function updateWatchWithLivePrices(ref, prices) {
+  if(!prices || !prices.length) return;
+  
+  // Calculate median from live prices
+  var sortedPrices = prices.map(function(p) { return parseFloat(p.price); })
+                           .filter(function(p) { return p > 0; })
+                           .sort(function(a,b) { return a-b; });
+  
+  if(!sortedPrices.length) return;
+  
+  var median = sortedPrices.length % 2 === 0
+    ? (sortedPrices[sortedPrices.length/2-1] + sortedPrices[sortedPrices.length/2]) / 2
+    : sortedPrices[Math.floor(sortedPrices.length/2)];
+
+  // Update matching watches
+  ALL_WATCHES.forEach(function(w) {
+    if(w.ref !== ref) return;
+    var oldMedian = w.market_median;
+    w.market_median = Math.round(median);
+    w.comp_count = prices.length;
+    
+    // Recalculate vs_median_pct
+    var storePrice = gp(w) || w.store_price;
+    if(storePrice && w.market_median) {
+      w.vs_median_pct = Math.round(((storePrice - w.market_median) / w.market_median) * 100 * 10) / 10;
+    }
+
+    // Update FULL_COMP_DATA with live prices
+    var k = gk(w);
+    if(!FULL_COMP_DATA[k]) FULL_COMP_DATA[k] = [];
+    
+    // Merge live prices into comp data
+    prices.forEach(function(p) {
+      var exists = false;
+      FULL_COMP_DATA[k].forEach(function(existing) {
+        if(existing.dealer === p.dealer) {
+          existing.price = parseFloat(p.price);
+          existing.live = true;
+          exists = true;
+        }
+      });
+      if(!exists && parseFloat(p.price) > 0) {
+        FULL_COMP_DATA[k].push({
+          dealer: p.dealer,
+          price: parseFloat(p.price),
+          url: p.url || '#',
+          live: true,
+          condition: 'Pre-owned'
+        });
+      }
+    });
+  });
+  
+  // Keep DATA in sync
+  DATA = ALL_WATCHES.slice();
+}
+
+// Trigger a manual market sweep
+function triggerManualSweep() {
+  var btn = document.querySelector('.topbar-refresh');
+  if(btn) { btn.textContent = '⟳ Sweeping...'; btn.style.opacity = '.6'; }
+  
+  fetch('/api/sweep', { method: 'POST' })
+    .then(function() {
+      toast('Market sweep started — prices update in ~2 minutes', '');
+      setTimeout(function() {
+        fetchLiveCompetitorPrices();
+        if(btn) { btn.textContent = '⟳ Refresh Market'; btn.style.opacity = '1'; }
+      }, 120000);
+    }).catch(function() {
+      toast('Refresh failed — check connection', 'error');
+      if(btn) { btn.textContent = '⟳ Refresh Market'; btn.style.opacity = '1'; }
+    });
+}
 
 </script>
 </body>
