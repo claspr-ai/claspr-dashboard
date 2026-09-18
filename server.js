@@ -74,6 +74,71 @@ function runApifyActor(actorId, input) {
   return fetchJSON(url, opts);
 }
 
+
+// ── DIRECT FALLBACK SCRAPER ──
+function scrapeDirectFallback() {
+  console.log('Using direct fallback scraper...');
+  var allWatches = [];
+  var pending = DEALER_URLS.length;
+  
+  return new Promise(function(resolve) {
+    DEALER_URLS.forEach(function(dealer) {
+      var opts = {
+        hostname: new URL(dealer.url).hostname,
+        path: new URL(dealer.url).pathname + new URL(dealer.url).search,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        timeout: 15000
+      };
+      
+      var req = https.request(opts, function(res) {
+        var data = '';
+        res.on('data', function(chunk) { data += chunk; });
+        res.on('end', function() {
+          try {
+            var json = JSON.parse(data);
+            var products = json.products || [];
+            var watches = 0;
+            products.forEach(function(p) {
+              if (!isWatch(p.title)) return;
+              var price = p.variants && p.variants[0] ? parseFloat(p.variants[0].price) : null;
+              if (!price || price < 1000) return;
+              allWatches.push({
+                dealer: dealer.name,
+                title: p.title,
+                reference: extractReference(p.title),
+                price: price,
+                url: 'https://' + opts.hostname + '/products/' + p.handle,
+                scraped_at: new Date().toISOString()
+              });
+              watches++;
+            });
+            console.log('Direct scraped ' + dealer.name + ': ' + watches + ' watches');
+          } catch(e) {
+            console.log('Parse error ' + dealer.name + ': ' + e.message);
+          }
+          pending--;
+          if (pending === 0) {
+            console.log('Direct fallback total: ' + allWatches.length);
+            resolve(allWatches);
+          }
+        });
+      });
+      req.on('error', function(e) {
+        console.log('Direct error ' + dealer.name + ': ' + e.message);
+        pending--;
+        if (pending === 0) resolve(allWatches);
+      });
+      req.setTimeout(15000, function() { req.destroy(); });
+      req.end();
+    });
+  });
+}
+
 // ── SCRAPE SHOPIFY DEALERS VIA APIFY WEB SCRAPER ──
 var DEALER_URLS = [
   { name: "Bob's Watches",    url: 'https://www.bobswatches.com/products.json?limit=250' },
@@ -118,9 +183,23 @@ function scrapeAllDealers() {
 
   return runApifyActor('apify~web-scraper', input).then(function(results) {
     var allWatches = [];
+    console.log('Apify raw response type:', typeof results);
     
+    // Handle different response formats
+    var items = [];
+    if (Array.isArray(results)) {
+      items = results;
+    } else if (results && Array.isArray(results.items)) {
+      items = results.items;
+    } else if (results && results.data && Array.isArray(results.data)) {
+      items = results.data;
+    } else {
+      console.log('Apify response keys:', results ? Object.keys(results).join(',') : 'null');
+      // Try parsing each dealer URL directly as fallback
+      return scrapeDirectFallback();
+    }
+    var results = items;
     if (!Array.isArray(results)) {
-      console.log('Apify returned:', typeof results);
       return allWatches;
     }
 
