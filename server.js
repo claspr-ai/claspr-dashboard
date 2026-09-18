@@ -76,12 +76,74 @@ function supabaseGet(reference) {
 }
 
 // ── WATCH DETECTION ──
-var WATCH_KEYWORDS = ['rolex','richard mille','rm ','patek philippe','audemars piguet','ap royal','cartier','hublot','f.p. journe','fp journe','vacheron','omega','breitling','iwc','panerai','tudor','a. lange','jaeger','zenith','tag heuer','chopard','girard'];
+var WATCH_KEYWORDS = [
+  // Brand names
+  'rolex','richard mille','patek philippe','audemars piguet','cartier',
+  'hublot','f.p. journe','fp journe','vacheron constantin','omega',
+  'breitling','iwc','panerai','tudor','a. lange','jaeger-lecoultre',
+  'zenith','tag heuer','chopard','girard-perregaux','ulysse nardin',
+  // Model names (catches listings without brand name)
+  'submariner','daytona','gmt-master','datejust','day-date','explorer',
+  'yacht-master','sky-dweller','sea-dweller','oyster perpetual',
+  'nautilus','aquanaut','royal oak','pepsi','batman','hulk',
+  'speedmaster','seamaster','constellation',
+  // Common abbreviations
+  'rm ','ap ','pp '
+];
 
 function isWatch(title) {
   if (!title) return false;
   var t = title.toLowerCase();
   return WATCH_KEYWORDS.some(function(k) { return t.indexOf(k) !== -1; });
+}
+
+
+// ── BRAND DETECTION ──
+var BRAND_MAP = [
+  // Rolex models
+  { keywords: ['rolex','submariner','daytona','gmt-master','datejust','day-date','explorer','yacht-master','sky-dweller','sea-dweller','oyster perpetual','pepsi','batman','hulk','116610','126610','116500','126500','116710','126710','116520','116613','116618','126618','116660','126660'], brand: 'Rolex' },
+  // Richard Mille
+  { keywords: ['richard mille','rm '], brand: 'Richard Mille' },
+  // Patek Philippe
+  { keywords: ['patek philippe','nautilus','aquanaut','calatrava','pp ','5711','5712','5726','5980','5990'], brand: 'Patek Philippe' },
+  // Audemars Piguet
+  { keywords: ['audemars piguet','royal oak','ap ','15202','15400','15500','26240','26331'], brand: 'Audemars Piguet' },
+  // Cartier
+  { keywords: ['cartier','santos','tank','ballon bleu','panthere','drive de cartier'], brand: 'Cartier' },
+  // Hublot
+  { keywords: ['hublot','big bang','classic fusion','spirit of big bang'], brand: 'Hublot' },
+  // F.P. Journe
+  { keywords: ['f.p. journe','fp journe','journe'], brand: 'F.P. Journe' },
+  // Vacheron Constantin
+  { keywords: ['vacheron','overseas','historiques'], brand: 'Vacheron Constantin' },
+  // Omega
+  { keywords: ['omega','speedmaster','seamaster','constellation','de ville'], brand: 'Omega' },
+  // Breitling
+  { keywords: ['breitling','navitimer','superocean','chronomat','avenger'], brand: 'Breitling' },
+  // IWC
+  { keywords: ['iwc','portugieser','pilot','portofino','ingenieur'], brand: 'IWC' },
+  // Panerai
+  { keywords: ['panerai','luminor','radiomir','submersible'], brand: 'Panerai' },
+  // Tudor
+  { keywords: ['tudor','black bay','pelagos','ranger'], brand: 'Tudor' },
+  // A. Lange
+  { keywords: ['a. lange','lange & sohne','lange sohne','datograph','lange'], brand: 'A. Lange & Söhne' },
+  // Jaeger
+  { keywords: ['jaeger','reverso','master control','polaris'], brand: 'Jaeger-LeCoultre' },
+];
+
+function detectBrand(title) {
+  if (!title) return null;
+  var t = title.toLowerCase();
+  for (var i = 0; i < BRAND_MAP.length; i++) {
+    var entry = BRAND_MAP[i];
+    for (var j = 0; j < entry.keywords.length; j++) {
+      if (t.indexOf(entry.keywords[j].toLowerCase()) !== -1) {
+        return entry.brand;
+      }
+    }
+  }
+  return null;
 }
 
 function extractReference(title) {
@@ -208,6 +270,7 @@ function scrapeBlockedWithApify(blockedDealers) {
       watches.push({
         dealer: dealer,
         title: product.title,
+        brand: detectBrand(product.title),
         reference: extractReference(product.title),
         price: parseFloat(price),
         url: product.url || '',
